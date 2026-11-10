@@ -298,7 +298,7 @@ export function FormularioAgendamento({
               }`}
             />
             <p className="text-[11px] text-slate-500 mt-1">
-              * Bloqueia agendamentos dentro de um intervalo menor que 60 minutos de outra coleta.
+              * Bloqueia outro agendamento com status Agendado marcado para o mesmo horário.
             </p>
             {errosCampo.dataColeta && (
               <p className="text-xs text-red-600 mt-1">{errosCampo.dataColeta}</p>

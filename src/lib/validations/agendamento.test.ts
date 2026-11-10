@@ -136,7 +136,7 @@ describe("Validação de Agendamento (Zod Schema)", () => {
   });
 });
 
-describe("Verificação de Conflito de Horário (Intervalo de 60 minutos)", () => {
+describe("Verificação de Conflito de Horário (Regra do Edital: mesmo horário)", () => {
   const baseData = new Date("2026-11-11T14:00:00.000Z");
 
   const agendamentoExistente: AgendamentoParaConflito = {
@@ -145,7 +145,7 @@ describe("Verificação de Conflito de Horário (Intervalo de 60 minutos)", () =
     status: "Agendado",
   };
 
-  it("deve detectar conflito para o mesmo horário exato", () => {
+  it("deve detectar conflito para o mesmo horário exato (mesmo minuto)", () => {
     const resultado = verificarConflitoHorario(
       new Date("2026-11-11T14:00:00.000Z"),
       [agendamentoExistente]
@@ -155,38 +155,18 @@ describe("Verificação de Conflito de Horário (Intervalo de 60 minutos)", () =
     expect(resultado.conflitoCom?.id).toBe(1);
   });
 
-  it("deve detectar conflito quando novo horário estiver 30 minutos depois (dentro da janela de 60 min)", () => {
+  it("NÃO deve detectar conflito quando o novo horário for em minuto diferente (ex.: 14:30)", () => {
     const resultado = verificarConflitoHorario(
       new Date("2026-11-11T14:30:00.000Z"),
-      [agendamentoExistente]
-    );
-
-    expect(resultado.temConflito).toBe(true);
-    expect(resultado.conflitoCom?.id).toBe(1);
-  });
-
-  it("deve detectar conflito quando novo horário estiver 45 minutos antes (dentro da janela de 60 min)", () => {
-    const resultado = verificarConflitoHorario(
-      new Date("2026-11-11T13:15:00.000Z"),
-      [agendamentoExistente]
-    );
-
-    expect(resultado.temConflito).toBe(true);
-    expect(resultado.conflitoCom?.id).toBe(1);
-  });
-
-  it("NÃO deve detectar conflito quando o novo horário for exatamente 60 minutos depois", () => {
-    const resultado = verificarConflitoHorario(
-      new Date("2026-11-11T15:00:00.000Z"),
       [agendamentoExistente]
     );
 
     expect(resultado.temConflito).toBe(false);
   });
 
-  it("NÃO deve detectar conflito quando o novo horário for exatamente 60 minutos antes", () => {
+  it("NÃO deve detectar conflito quando o novo horário for 1 minuto diferente (ex.: 14:01)", () => {
     const resultado = verificarConflitoHorario(
-      new Date("2026-11-11T13:00:00.000Z"),
+      new Date("2026-11-11T14:01:00.000Z"),
       [agendamentoExistente]
     );
 
@@ -223,7 +203,7 @@ describe("Verificação de Conflito de Horário (Intervalo de 60 minutos)", () =
     expect(resultado.temConflito).toBe(false);
   });
 
-  it("na EDIÇÃO: NÃO deve gerar conflito quando o agendamento concorrente for o próprio registro que está sendo editado", () => {
+  it("na EDIÇÃO: NÃO deve gerar conflito quando o agendamento no mesmo horário for o próprio registro que está sendo editado", () => {
     // Editando o agendamento id: 1 mantendo o mesmo horário
     const resultado = verificarConflitoHorario(
       new Date("2026-11-11T14:00:00.000Z"),
@@ -234,16 +214,16 @@ describe("Verificação de Conflito de Horário (Intervalo de 60 minutos)", () =
     expect(resultado.temConflito).toBe(false);
   });
 
-  it("na EDIÇÃO: DEVE gerar conflito quando colidir com OUTRO registro diferente", () => {
+  it("na EDIÇÃO: DEVE gerar conflito quando colidir com OUTRO registro diferente no mesmo horário", () => {
     const outroAgendamento: AgendamentoParaConflito = {
       id: 99,
-      dataColeta: new Date("2026-11-11T14:20:00.000Z"),
+      dataColeta: new Date("2026-11-11T16:00:00.000Z"),
       status: "Agendado",
     };
 
-    // Editando o id: 1, mas tentando alterar para um horário que conflita com o id: 99
+    // Editando o id: 1, mas tentando alterar para o mesmo horário do id: 99 (16:00)
     const resultado = verificarConflitoHorario(
-      new Date("2026-11-11T14:10:00.000Z"),
+      new Date("2026-11-11T16:00:00.000Z"),
       [agendamentoExistente, outroAgendamento],
       1 // ignorando o id: 1, mas colidindo com o id: 99
     );
@@ -252,4 +232,3 @@ describe("Verificação de Conflito de Horário (Intervalo de 60 minutos)", () =
     expect(resultado.conflitoCom?.id).toBe(99);
   });
 });
-

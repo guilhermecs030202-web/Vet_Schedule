@@ -57,7 +57,7 @@ export function criarAgendamentoSchema(dataReferencia?: Date | (() => Date)) {
       )
       .refine(
         (data) => {
-          // Avalia a data de referência dinamicamente no momento do parse!
+          // Avalia a data de referência dinamicamente no momento da validação
           const ref = obterDataReferencia();
           return data.getTime() >= ref.getTime();
         },
@@ -83,7 +83,7 @@ export const agendamentoSchema = criarAgendamentoSchema(() => new Date());
 export type AgendamentoInput = z.infer<ReturnType<typeof criarAgendamentoSchema>>;
 
 /**
- * Interface simplificada para verificação de conflitos de horário.
+ * Interface para verificação de conflitos de horário.
  */
 export interface AgendamentoParaConflito {
   id: number;
@@ -97,14 +97,21 @@ export interface ResultadoConflitoHorario {
   mensagem?: string;
 }
 
-export const INTERVALO_BLOQUEIO_MINUTOS = 60;
+/**
+ * Normaliza um timestamp para a precisão de minuto (descartando segundos e milissegundos).
+ */
+function normalizarParaMinuto(d: Date): number {
+  return Math.floor(d.getTime() / 60000) * 60000;
+}
 
 /**
- * Verifica se há conflito de horário para um agendamento.
+ * Verifica se há conflito de horário conforme a regra do teste técnico da Lands:
+ * "dois agendamentos com status Agendado no mesmo horário bloqueados."
+ *
  * Regras:
- * 1. Não pode existir outro agendamento com status "Agendado" dentro do intervalo menor que 60 minutos (antes ou depois).
+ * 1. Não pode existir outro agendamento com status "Agendado" no mesmo horário (mesmo ano, mês, dia, hora e minuto).
  * 2. Na edição (quando agendamentoAtualId é fornecido), o próprio registro é ignorado.
- * 3. Registros com status "Cancelado" ou "Coletado" não geram conflito de horário.
+ * 3. Registros com status "Cancelado" ou "Coletado" não geram conflito.
  */
 export function verificarConflitoHorario(
   novaData: Date | string,
@@ -112,7 +119,7 @@ export function verificarConflitoHorario(
   agendamentoAtualId?: number
 ): ResultadoConflitoHorario {
   const novaDataObj = typeof novaData === "string" ? new Date(novaData) : novaData;
-  const novoTimestamp = novaDataObj.getTime();
+  const novoMinutoTimestamp = normalizarParaMinuto(novaDataObj);
 
   for (const agendamento of agendamentosExistentes) {
     // Na edição, ignorar o próprio registro
@@ -120,7 +127,7 @@ export function verificarConflitoHorario(
       continue;
     }
 
-    // Apenas registros com status "Agendado" bloqueiam a agenda
+    // Apenas registros com status "Agendado" bloqueiam o horário
     if (agendamento.status !== "Agendado") {
       continue;
     }
@@ -130,15 +137,14 @@ export function verificarConflitoHorario(
         ? new Date(agendamento.dataColeta)
         : agendamento.dataColeta;
 
-    const diffMs = Math.abs(novoTimestamp - dataExistente.getTime());
-    const diffMinutos = diffMs / (1000 * 60);
+    const existenteMinutoTimestamp = normalizarParaMinuto(dataExistente);
 
-    // Se a diferença for menor que 60 minutos, há conflito de horário
-    if (diffMinutos < INTERVALO_BLOQUEIO_MINUTOS) {
+    // Conflito se for exatamente no mesmo horário (mesmo minuto)
+    if (novoMinutoTimestamp === existenteMinutoTimestamp) {
       return {
         temConflito: true,
         conflitoCom: agendamento,
-        mensagem: `Conflito de horário: já existe uma coleta agendada às ${dataExistente.toISOString()} dentro do intervalo de ${INTERVALO_BLOQUEIO_MINUTOS} minutos.`,
+        mensagem: `Conflito de horário: já existe uma coleta agendada para o mesmo horário (${dataExistente.toISOString()}).`,
       };
     }
   }
