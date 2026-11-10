@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { AppDataSource } from "../lib/data-source";
 import { Usuario } from "../entities/Usuario";
+import { Agendamento } from "../entities/Agendamento";
 import { gerarHashSenha } from "../lib/auth";
 
 async function criarTabelasSeNaoExistirem() {
@@ -51,8 +52,9 @@ async function runSeed() {
   await criarTabelasSeNaoExistirem();
 
   const usuarioRepository = AppDataSource.getRepository(Usuario);
+  const agendamentoRepository = AppDataSource.getRepository(Agendamento);
 
-  // Verifica se o usuário já existe para não duplicar
+  // 1. Seed do Usuário Fixo
   const usuarioExistente = await usuarioRepository.findOne({
     where: { email: email.toLowerCase().trim() },
   });
@@ -68,6 +70,57 @@ async function runSeed() {
 
     await usuarioRepository.save(novoUsuario);
     console.log(`✅ [Seed] Usuário criado com sucesso! E-mail: ${email}`);
+  }
+
+  // 2. Seed de Agendamentos de Demonstração (apenas se a tabela estiver vazia)
+  const totalAgendamentos = await agendamentoRepository.count();
+
+  if (totalAgendamentos === 0) {
+    console.log("🌱 [Seed] Populando agendamentos de exemplo...");
+
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+
+    const data1 = new Date(amanha);
+    data1.setHours(9, 0, 0, 0);
+
+    const data2 = new Date(amanha);
+    data2.setHours(14, 0, 0, 0);
+
+    const data3 = new Date(amanha);
+    data3.setHours(16, 30, 0, 0);
+
+    const agendamentosExemplo = [
+      agendamentoRepository.create({
+        clinica: "Clínica Veterinária PetCare",
+        animal: "Thor (Golden Retriever)",
+        tipoExame: "Hemograma completo",
+        dataColeta: data1,
+        status: "Agendado",
+        observacoes: "Animal em jejum de 8 horas. Retirar com a Dra. Camila.",
+      }),
+      agendamentoRepository.create({
+        clinica: "Hospital Veterinário São Francisco",
+        animal: "Mia (Felino Siamês)",
+        tipoExame: "Cultura e antibiograma",
+        dataColeta: data2,
+        status: "Agendado",
+        observacoes: "Amostra de secreção ótica refrigerada.",
+      }),
+      agendamentoRepository.create({
+        clinica: "Clínica Vet Saúde",
+        animal: "Bob (Poodle)",
+        tipoExame: "Bioquímico hepático e renal",
+        dataColeta: data3,
+        status: "Cancelado",
+        observacoes: "Tutor remarcou para a próxima semana.",
+      }),
+    ];
+
+    await agendamentoRepository.save(agendamentosExemplo);
+    console.log(`✅ [Seed] ${agendamentosExemplo.length} agendamentos de exemplo criados!`);
+  } else {
+    console.log(`ℹ️ [Seed] Tabela de agendamentos já contém ${totalAgendamentos} registros.`);
   }
 
   await AppDataSource.destroy();
