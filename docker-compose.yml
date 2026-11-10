@@ -35,9 +35,9 @@ services:
       - DB_USER=${DB_USER:-vetschedule_user}
       - DB_PASSWORD=${DB_PASSWORD:-vetschedule_password}
       - DB_NAME=${DB_NAME:-VetSchedule}
-      - JWT_SECRET=${JWT_SECRET}
-      - SEED_USER_EMAIL=${SEED_USER_EMAIL}
-      - SEED_USER_PASSWORD=${SEED_USER_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET:-vetschedule_chave_secreta_longa_e_aleatoria_com_mais_de_32_caracteres_12345}
+      - SEED_USER_EMAIL=${SEED_USER_EMAIL:-recepcao@vetschedule.com}
+      - SEED_USER_PASSWORD=${SEED_USER_PASSWORD:-Admin@123}
     depends_on:
       mysql:
         condition: service_healthy
