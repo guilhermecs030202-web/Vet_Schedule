@@ -109,6 +109,31 @@ describe("Validação de Agendamento (Zod Schema)", () => {
       }
     }
   });
+
+  it("deve suportar função dinâmica para data de referência (evitando congelar no boot do servidor)", () => {
+    let tempoDinamico = new Date("2026-11-10T12:00:00.000Z");
+    const schemaDinamico = criarAgendamentoSchema(() => tempoDinamico);
+
+    // Às 12:00, uma data às 12:30 é válida
+    const resValido = schemaDinamico.safeParse({
+      ...payloadValido,
+      dataColeta: new Date("2026-11-10T12:30:00.000Z"),
+    });
+    expect(resValido.success).toBe(true);
+
+    // Avança o relógio dinâmico para 13:00
+    tempoDinamico = new Date("2026-11-10T13:00:00.000Z");
+
+    // Agora, a mesma data de 12:30 deve ser rejeitada como passado!
+    const resInvalido = schemaDinamico.safeParse({
+      ...payloadValido,
+      dataColeta: new Date("2026-11-10T12:30:00.000Z"),
+    });
+    expect(resInvalido.success).toBe(false);
+    if (!resInvalido.success) {
+      expect(resInvalido.error.issues[0].message).toBe("Data da coleta não pode estar no passado");
+    }
+  });
 });
 
 describe("Verificação de Conflito de Horário (Intervalo de 60 minutos)", () => {

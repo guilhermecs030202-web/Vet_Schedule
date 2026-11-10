@@ -1,4 +1,4 @@
-import { Between, FindOptionsWhere } from "typeorm";
+import { Between, FindOptionsWhere, EntityManager } from "typeorm";
 import { getDataSource } from "@/lib/data-source";
 import { Agendamento, StatusAgendamento } from "@/entities/Agendamento";
 import {
@@ -36,9 +36,14 @@ export class AgendamentoService {
         throw new Error("VALIDATION_ERROR: Formato de data inválido. Use YYYY-MM-DD.");
       }
 
-      // Considera o dia inteiro: das 00:00:00.000 às 23:59:59.999
-      const dataInicio = new Date(`${filtros.data}T00:00:00.000`);
-      const dataFim = new Date(`${filtros.data}T23:59:59.999`);
+      // Constrói o intervalo cobrindo o dia completo com segurança
+      const partes = filtros.data.split("-").map(Number);
+      const ano = partes[0];
+      const mes = partes[1] - 1;
+      const dia = partes[2];
+
+      const dataInicio = new Date(ano, mes, dia, 0, 0, 0, 0);
+      const dataFim = new Date(ano, mes, dia, 23, 59, 59, 999);
 
       if (isNaN(dataInicio.getTime()) || isNaN(dataFim.getTime())) {
         throw new Error("VALIDATION_ERROR: Data fornecida é inválida.");
@@ -65,7 +70,7 @@ export class AgendamentoService {
   }
 
   /**
-   * Cria um agendamento executando validações e checagem de conflito dentro de uma transação.
+   * Cria um agendamento executando validações e checagem de conflito com lock pessimista em transação.
    */
   static async criar(payload: unknown): Promise<Agendamento> {
     const validacao = agendamentoSchema.safeParse(payload);
@@ -78,33 +83,10 @@ export class AgendamentoService {
     const dados = validacao.data;
     const dataSource = await getDataSource();
 
-    // Executa verificação e gravação em uma transação atômica
-    return dataSource.transaction(async (manager) => {
+    // Executa em transação com lock pessimista para evitar condições de corrida (race conditions)
+    return dataSource.transaction(async (manager: EntityManager) => {
       if (dados.status === "Agendado") {
-        const raioMs = (INTERVALO_BLOQUEIO_MINUTOS + 10) * 60 * 1000;
-        const inicioJanela = new Date(dados.dataColeta.getTime() - raioMs);
-        const fimJanela = new Date(dados.dataColeta.getTime() + raioMs);
-
-        // Busca registros concorrentes dentro da janela de tempo
-        const agendamentosProximos = await manager.find(Agendamento, {
-          where: {
-            dataColeta: Between(inicioJanela, fimJanela),
-            status: "Agendado",
-          },
-        });
-
-        const conflito = verificarConflitoHorario(
-          dados.dataColeta,
-          agendamentosProximos.map((a) => ({
-            id: a.id,
-            dataColeta: a.dataColeta,
-            status: a.status,
-          }))
-        );
-
-        if (conflito.temConflito) {
-          throw new Error(`CONFLICT: ${conflito.mensagem}`);
-        }
+        await this.validarConflitoComLock(dados.dataColeta, manager);
       }
 
       const novo = manager.create(Agendamento, {
@@ -122,7 +104,10 @@ export class AgendamentoService {
 
   /**
    * Edita um agendamento existente dentro de uma transação.
-   * Na checagem de conflito de horário, ignora o próprio registro.
+   * Regras de Integridade:
+   * 1. Agendamento com status "Cancelado" não pode ser reeditado.
+   * 2. Agendamento com status "Coletado" não pode ter a data alterada nem ser revertido para Cancelado.
+   * 3. Na checagem de conflito, o próprio registro é ignorado.
    */
   static async atualizar(id: number, payload: unknown): Promise<Agendamento> {
     const validacao = agendamentoSchema.safeParse(payload);
@@ -135,39 +120,34 @@ export class AgendamentoService {
     const dados = validacao.data;
     const dataSource = await getDataSource();
 
-    return dataSource.transaction(async (manager) => {
-      const agendamento = await manager.findOne(Agendamento, { where: { id } });
+    return dataSource.transaction(async (manager: EntityManager) => {
+      // Bloqueia a linha existente para atualização
+      const agendamento = await manager.findOne(Agendamento, {
+        where: { id },
+        lock: { mode: "pessimistic_write" },
+      });
 
       if (!agendamento) {
         throw new Error("NOT_FOUND: Agendamento não encontrado.");
       }
 
-      if (dados.status === "Agendado") {
-        const raioMs = (INTERVALO_BLOQUEIO_MINUTOS + 10) * 60 * 1000;
-        const inicioJanela = new Date(dados.dataColeta.getTime() - raioMs);
-        const fimJanela = new Date(dados.dataColeta.getTime() + raioMs);
+      // Regra 1: Bloqueia reativação ou edição de agendamento cancelado
+      if (agendamento.status === "Cancelado") {
+        throw new Error("VALIDATION_ERROR: Não é possível editar um agendamento que se encontra cancelado.");
+      }
 
-        const agendamentosProximos = await manager.find(Agendamento, {
-          where: {
-            dataColeta: Between(inicioJanela, fimJanela),
-            status: "Agendado",
-          },
-        });
-
-        // Ignora o próprio ID na verificação
-        const conflito = verificarConflitoHorario(
-          dados.dataColeta,
-          agendamentosProximos.map((a) => ({
-            id: a.id,
-            dataColeta: a.dataColeta,
-            status: a.status,
-          })),
-          id
-        );
-
-        if (conflito.temConflito) {
-          throw new Error(`CONFLICT: ${conflito.mensagem}`);
+      // Regra 2: Se já foi coletado, não permite alterar a data ou cancelar
+      if (agendamento.status === "Coletado") {
+        if (dados.status === "Cancelado") {
+          throw new Error("VALIDATION_ERROR: Não é possível cancelar uma amostra que já foi coletada.");
         }
+        if (agendamento.dataColeta.getTime() !== dados.dataColeta.getTime()) {
+          throw new Error("VALIDATION_ERROR: Não é possível alterar a data/hora de uma coleta já realizada.");
+        }
+      }
+
+      if (dados.status === "Agendado") {
+        await this.validarConflitoComLock(dados.dataColeta, manager, id);
       }
 
       agendamento.clinica = dados.clinica;
@@ -185,13 +165,17 @@ export class AgendamentoService {
    * Cancela um agendamento.
    * Regras:
    * 1. Nunca remove o registro do banco.
-   * 2. Não deve ser possível cancelar o que já está Cancelado.
+   * 2. Bloqueia cancelamento se já estiver Cancelado.
+   * 3. Bloqueia cancelamento se já estiver Coletado.
    */
   static async cancelar(id: number): Promise<Agendamento> {
     const dataSource = await getDataSource();
 
-    return dataSource.transaction(async (manager) => {
-      const agendamento = await manager.findOne(Agendamento, { where: { id } });
+    return dataSource.transaction(async (manager: EntityManager) => {
+      const agendamento = await manager.findOne(Agendamento, {
+        where: { id },
+        lock: { mode: "pessimistic_write" },
+      });
 
       if (!agendamento) {
         throw new Error("NOT_FOUND: Agendamento não encontrado.");
@@ -201,8 +185,48 @@ export class AgendamentoService {
         throw new Error("VALIDATION_ERROR: Este agendamento já se encontra cancelado.");
       }
 
+      if (agendamento.status === "Coletado") {
+        throw new Error("VALIDATION_ERROR: Não é possível cancelar uma amostra que já foi coletada.");
+      }
+
       agendamento.status = "Cancelado";
       return manager.save(agendamento);
     });
+  }
+
+  /**
+   * Busca registros concorrentes e valida a janela de 60 minutos aplicando lock pessimista de escrita.
+   */
+  private static async validarConflitoComLock(
+    dataColeta: Date,
+    manager: EntityManager,
+    ignorarId?: number
+  ): Promise<void> {
+    const raioMs = (INTERVALO_BLOQUEIO_MINUTOS + 10) * 60 * 1000;
+    const inicioJanela = new Date(dataColeta.getTime() - raioMs);
+    const fimJanela = new Date(dataColeta.getTime() + raioMs);
+
+    // Usa lock pessimista de escrita para garantir que nenhuma transação paralela insira no mesmo intervalo
+    const agendamentosProximos = await manager.find(Agendamento, {
+      where: {
+        dataColeta: Between(inicioJanela, fimJanela),
+        status: "Agendado",
+      },
+      lock: { mode: "pessimistic_write" },
+    });
+
+    const conflito = verificarConflitoHorario(
+      dataColeta,
+      agendamentosProximos.map((a) => ({
+        id: a.id,
+        dataColeta: a.dataColeta,
+        status: a.status,
+      })),
+      ignorarId
+    );
+
+    if (conflito.temConflito) {
+      throw new Error(`CONFLICT: ${conflito.mensagem}`);
+    }
   }
 }

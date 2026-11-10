@@ -11,9 +11,20 @@ export const statusAgendamentoSchema = z.enum(STATUS_AGENDAMENTO, {
 
 /**
  * Cria o schema de validação para agendamento.
- * Permite receber uma data de referência (padrão: agora) para facilitar testes determinísticos.
+ * dataReferencia pode ser uma Date fixa (para testes determinísticos)
+ * ou uma função geradora (para avaliar 'agora' dinamicamente no momento da validação).
  */
-export function criarAgendamentoSchema(dataReferencia: Date = new Date()) {
+export function criarAgendamentoSchema(dataReferencia?: Date | (() => Date)) {
+  const obterDataReferencia = (): Date => {
+    if (typeof dataReferencia === "function") {
+      return dataReferencia();
+    }
+    if (dataReferencia instanceof Date) {
+      return dataReferencia;
+    }
+    return new Date();
+  };
+
   return z.object({
     clinica: z
       .string({ required_error: "Clínica é obrigatória" })
@@ -45,7 +56,11 @@ export function criarAgendamentoSchema(dataReferencia: Date = new Date()) {
         { message: "Data da coleta inválida" }
       )
       .refine(
-        (data) => data.getTime() >= dataReferencia.getTime(),
+        (data) => {
+          // Avalia a data de referência dinamicamente no momento do parse!
+          const ref = obterDataReferencia();
+          return data.getTime() >= ref.getTime();
+        },
         { message: "Data da coleta não pode estar no passado" }
       ),
 
@@ -60,12 +75,15 @@ export function criarAgendamentoSchema(dataReferencia: Date = new Date()) {
   });
 }
 
-export const agendamentoSchema = criarAgendamentoSchema();
+/**
+ * Schema padrão da aplicação: avalia dinamicamente new Date() no momento de cada validação,
+ * impedindo que a data congele quando o servidor inicia.
+ */
+export const agendamentoSchema = criarAgendamentoSchema(() => new Date());
 export type AgendamentoInput = z.infer<ReturnType<typeof criarAgendamentoSchema>>;
 
 /**
  * Interface simplificada para verificação de conflitos de horário.
- * Mantém a lógica de negócio pura e independente do ORM ou banco de dados.
  */
 export interface AgendamentoParaConflito {
   id: number;
@@ -84,7 +102,7 @@ export const INTERVALO_BLOQUEIO_MINUTOS = 60;
 /**
  * Verifica se há conflito de horário para um agendamento.
  * Regras:
- * 1. Não pode existir outro agendamento com status "Agendado" dentro do intervalo de 60 minutos (antes ou depois).
+ * 1. Não pode existir outro agendamento com status "Agendado" dentro do intervalo menor que 60 minutos (antes ou depois).
  * 2. Na edição (quando agendamentoAtualId é fornecido), o próprio registro é ignorado.
  * 3. Registros com status "Cancelado" ou "Coletado" não geram conflito de horário.
  */
@@ -115,7 +133,7 @@ export function verificarConflitoHorario(
     const diffMs = Math.abs(novoTimestamp - dataExistente.getTime());
     const diffMinutos = diffMs / (1000 * 60);
 
-    // Se o agendamento estiver dentro do intervalo de 60 minutos (< 60), bloqueia
+    // Se a diferença for menor que 60 minutos, há conflito de horário
     if (diffMinutos < INTERVALO_BLOQUEIO_MINUTOS) {
       return {
         temConflito: true,
@@ -127,4 +145,3 @@ export function verificarConflitoHorario(
 
   return { temConflito: false };
 }
-

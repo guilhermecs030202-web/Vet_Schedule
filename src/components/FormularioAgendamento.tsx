@@ -99,7 +99,21 @@ export function FormularioAgendamento({
     if (!clinica.trim()) novosErros.clinica = "Clínica é obrigatória";
     if (!animal.trim()) novosErros.animal = "Animal é obrigatório";
     if (!tipoExameFinal) novosErros.tipoExame = "Tipo de exame é obrigatório";
-    if (!dataColeta) novosErros.dataColeta = "Data e hora da coleta são obrigatórias";
+    if (!dataColeta) {
+      novosErros.dataColeta = "Data e hora da coleta são obrigatórias";
+    } else {
+      const dataEscolhida = new Date(dataColeta);
+      if (isNaN(dataEscolhida.getTime())) {
+        novosErros.dataColeta = "Data e hora inválidas";
+      } else if (!isEdicao && dataEscolhida.getTime() < Date.now()) {
+        novosErros.dataColeta = "Data da coleta não pode estar no passado";
+      } else if (isEdicao && agendamentoParaEditar) {
+        const dataOriginal = new Date(agendamentoParaEditar.dataColeta).getTime();
+        if (dataEscolhida.getTime() !== dataOriginal && dataEscolhida.getTime() < Date.now()) {
+          novosErros.dataColeta = "A nova data da coleta não pode estar no passado";
+        }
+      }
+    }
 
     if (Object.keys(novosErros).length > 0) {
       setErrosCampo(novosErros);

@@ -34,12 +34,12 @@ async function criarTabelasSeNaoExistirem() {
 async function runSeed() {
   console.log("🌱 [Seed] Iniciando processo de seed...");
 
-  const email = process.env.SEED_USER_EMAIL || "recepcao@vetschedule.com";
-  const senha = process.env.SEED_USER_PASSWORD || "Admin@123";
+  const email = process.env.SEED_USER_EMAIL;
+  const senha = process.env.SEED_USER_PASSWORD;
 
   if (!email || !senha) {
     throw new Error(
-      "As variáveis SEED_USER_EMAIL e SEED_USER_PASSWORD devem estar definidas no .env"
+      "As variáveis SEED_USER_EMAIL e SEED_USER_PASSWORD devem estar obrigatoriamente definidas no arquivo .env"
     );
   }
 

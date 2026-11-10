@@ -180,21 +180,32 @@ export function TabelaAgendamentos({
                     <div className="inline-flex items-center gap-1.5">
                       <button
                         onClick={() => onEditar(item)}
-                        className="px-2.5 py-1 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-md transition-colors"
-                        title="Editar agendamento"
+                        disabled={estaCancelado}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                          estaCancelado
+                            ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                            : "text-slate-700 bg-white hover:bg-slate-100 border border-slate-300"
+                        }`}
+                        title={estaCancelado ? "Agendamento cancelado não pode ser editado" : "Editar agendamento"}
                       >
                         Editar
                       </button>
 
                       <button
                         onClick={() => onCancelar(item)}
-                        disabled={estaCancelado}
+                        disabled={estaCancelado || item.status === "Coletado"}
                         className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                          estaCancelado
+                          estaCancelado || item.status === "Coletado"
                             ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
                             : "bg-white text-red-600 hover:bg-red-50 border border-red-200"
                         }`}
-                        title={estaCancelado ? "Este agendamento já está cancelado" : "Cancelar coleta"}
+                        title={
+                          estaCancelado
+                            ? "Este agendamento já está cancelado"
+                            : item.status === "Coletado"
+                            ? "Amostra já coletada não pode ser cancelada"
+                            : "Cancelar coleta"
+                        }
                       >
                         Cancelar
                       </button>
@@ -244,15 +255,20 @@ export function TabelaAgendamentos({
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   onClick={() => onEditar(item)}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-md transition-colors"
+                  disabled={estaCancelado}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    estaCancelado
+                      ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                      : "text-slate-700 bg-white hover:bg-slate-100 border border-slate-300"
+                  }`}
                 >
                   Editar
                 </button>
                 <button
                   onClick={() => onCancelar(item)}
-                  disabled={estaCancelado}
+                  disabled={estaCancelado || item.status === "Coletado"}
                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                    estaCancelado
+                    estaCancelado || item.status === "Coletado"
                       ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
                       : "bg-white text-red-600 hover:bg-red-50 border border-red-200"
                   }`}

@@ -10,7 +10,18 @@ export interface TokenPayload {
 }
 
 export function getJwtSecretKey(): Uint8Array {
-  const secret = process.env.JWT_SECRET || "default_dev_secret_key_change_in_production_min_32_chars";
+  const secret = process.env.JWT_SECRET;
+
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "FATAL: A variável de ambiente JWT_SECRET é obrigatória em ambiente de produção."
+      );
+    }
+    // Fallback explícito apenas para testes locais de desenvolvimento se esquecer o .env
+    return new TextEncoder().encode("vetschedule_dev_secret_key_minimum_length_required_32_chars");
+  }
+
   return new TextEncoder().encode(secret);
 }
 
@@ -48,4 +59,3 @@ export async function verificarTokenJWT(token: string): Promise<TokenPayload | n
     return null;
   }
 }
-
