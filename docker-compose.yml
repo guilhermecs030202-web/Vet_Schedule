@@ -4,20 +4,49 @@ services:
     container_name: vetschedule_mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: ${DB_NAME:-VetSchedule}
+      MYSQL_USER: ${DB_USER:-vetschedule_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-vetschedule_password}
     ports:
       - "${DB_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+    networks:
+      - vetschedule_network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD} || exit 1"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 15s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vetschedule_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-vetschedule_user}
+      - DB_PASSWORD=${DB_PASSWORD:-vetschedule_password}
+      - DB_NAME=${DB_NAME:-VetSchedule}
+      - JWT_SECRET=${JWT_SECRET}
+      - SEED_USER_EMAIL=${SEED_USER_EMAIL}
+      - SEED_USER_PASSWORD=${SEED_USER_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - vetschedule_network
 
 volumes:
   mysql_data:
 
+networks:
+  vetschedule_network:
+    driver: bridge
