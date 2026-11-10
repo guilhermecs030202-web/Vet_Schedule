@@ -21,7 +21,7 @@ export const AppDataSource =
     username: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
-    synchronize: process.env.NODE_ENV !== "production",
+    synchronize: false,
     logging: process.env.NODE_ENV === "development",
     entities: [Agendamento, Usuario],
     migrations: [],
