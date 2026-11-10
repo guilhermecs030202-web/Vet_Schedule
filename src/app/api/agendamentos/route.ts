@@ -21,8 +21,28 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl;
     const status = searchParams.get("status") || undefined;
     const data = searchParams.get("data") || undefined;
+    const busca = searchParams.get("busca") || undefined;
+    const pageParam = searchParams.get("page");
+    const limitParam = searchParams.get("limit");
 
-    const agendamentos = await AgendamentoService.listar({ status, data });
+    // Se parâmetros de paginação forem enviados, retorna a estrutura paginada
+    if (pageParam !== null || limitParam !== null) {
+      const pagina = Math.max(1, parseInt(pageParam || "1", 10) || 1);
+      const limite = Math.max(1, Math.min(50, parseInt(limitParam || "6", 10) || 6));
+
+      const resultado = await AgendamentoService.listarPaginado({
+        status,
+        data,
+        busca,
+        pagina,
+        limite,
+      });
+
+      return NextResponse.json(resultado);
+    }
+
+    // Caso contrário, retorna a lista completa (com filtros opcionais)
+    const agendamentos = await AgendamentoService.listar({ status, data, busca });
 
     return NextResponse.json(agendamentos);
   } catch (error) {

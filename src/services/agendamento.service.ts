@@ -1,25 +1,35 @@
-import { Between, FindOptionsWhere, EntityManager } from "typeorm";
+import { Between, FindOptionsWhere, EntityManager, In, Like } from "typeorm";
 import { getDataSource } from "@/lib/data-source";
 import { Agendamento, StatusAgendamento } from "@/entities/Agendamento";
 import {
   agendamentoSchema,
   verificarConflitoHorario,
-  INTERVALO_BLOQUEIO_MINUTOS,
 } from "@/lib/validations/agendamento";
 
 export interface FiltrosListagem {
   status?: string;
   data?: string; // Formato YYYY-MM-DD
+  busca?: string; // Busca textual por clínica
+}
+
+export interface FiltrosPaginacao extends FiltrosListagem {
+  pagina?: number;
+  limite?: number;
+}
+
+export interface ResultadoPaginado<T> {
+  itens: T[];
+  total: number;
+  pagina: number;
+  totalPaginas: number;
+  limite: number;
 }
 
 export class AgendamentoService {
   /**
-   * Lista agendamentos ordenados por dataColeta crescente com filtros opcionais.
+   * Constrói a cláusula WHERE a partir dos filtros fornecidos.
    */
-  static async listar(filtros: FiltrosListagem = {}): Promise<Agendamento[]> {
-    const dataSource = await getDataSource();
-    const repo = dataSource.getRepository(Agendamento);
-
+  private static construirWhere(filtros: FiltrosListagem): FindOptionsWhere<Agendamento> {
     const where: FindOptionsWhere<Agendamento> = {};
 
     if (filtros.status) {
@@ -36,7 +46,7 @@ export class AgendamentoService {
         throw new Error("VALIDATION_ERROR: Formato de data inválido. Use YYYY-MM-DD.");
       }
 
-      // Constrói o intervalo cobrindo o dia completo com segurança
+      // Constrói o intervalo cobrindo o dia completo
       const partes = filtros.data.split("-").map(Number);
       const ano = partes[0];
       const mes = partes[1] - 1;
@@ -52,12 +62,61 @@ export class AgendamentoService {
       where.dataColeta = Between(dataInicio, dataFim);
     }
 
+    if (filtros.busca && filtros.busca.trim().length > 0) {
+      where.clinica = Like(`%${filtros.busca.trim()}%`);
+    }
+
+    return where;
+  }
+
+  /**
+   * Lista agendamentos ordenados por dataColeta crescente com filtros opcionais.
+   */
+  static async listar(filtros: FiltrosListagem = {}): Promise<Agendamento[]> {
+    const dataSource = await getDataSource();
+    const repo = dataSource.getRepository(Agendamento);
+    const where = this.construirWhere(filtros);
+
     return repo.find({
       where,
       order: {
         dataColeta: "ASC",
       },
     });
+  }
+
+  /**
+   * Lista agendamentos com paginação no banco de dados e contagem total de registros.
+   */
+  static async listarPaginado(
+    filtros: FiltrosPaginacao = {}
+  ): Promise<ResultadoPaginado<Agendamento>> {
+    const dataSource = await getDataSource();
+    const repo = dataSource.getRepository(Agendamento);
+
+    const pagina = Math.max(1, filtros.pagina || 1);
+    const limite = Math.max(1, Math.min(50, filtros.limite || 6));
+    const skip = (pagina - 1) * limite;
+    const where = this.construirWhere(filtros);
+
+    const [itens, total] = await repo.findAndCount({
+      where,
+      order: {
+        dataColeta: "ASC",
+      },
+      skip,
+      take: limite,
+    });
+
+    const totalPaginas = Math.ceil(total / limite) || 1;
+
+    return {
+      itens,
+      total,
+      pagina,
+      totalPaginas,
+      limite,
+    };
   }
 
   /**
@@ -70,7 +129,8 @@ export class AgendamentoService {
   }
 
   /**
-   * Cria um agendamento executando validações e checagem de conflito com lock pessimista em transação.
+   * Cria um agendamento executando validações e checagem de conflito no mesmo horário.
+   * Regra do edital: dois agendamentos com status Agendado no mesmo horário bloqueados.
    */
   static async criar(payload: unknown): Promise<Agendamento> {
     const validacao = agendamentoSchema.safeParse(payload);
@@ -83,10 +143,10 @@ export class AgendamentoService {
     const dados = validacao.data;
     const dataSource = await getDataSource();
 
-    // Executa em transação com lock pessimista para evitar condições de corrida (race conditions)
+    // Executa em transação com lock pessimista para evitar concorrência
     return dataSource.transaction(async (manager: EntityManager) => {
       if (dados.status === "Agendado") {
-        await this.validarConflitoComLock(dados.dataColeta, manager);
+        await this.validarConflitoMesmoHorario(dados.dataColeta, manager);
       }
 
       const novo = manager.create(Agendamento, {
@@ -104,7 +164,7 @@ export class AgendamentoService {
 
   /**
    * Edita um agendamento existente dentro de uma transação.
-   * Regras de Integridade:
+   * Regras:
    * 1. Agendamento com status "Cancelado" não pode ser reeditado.
    * 2. Agendamento com status "Coletado" não pode ter a data alterada nem ser revertido para Cancelado.
    * 3. Na checagem de conflito, o próprio registro é ignorado.
@@ -121,7 +181,6 @@ export class AgendamentoService {
     const dataSource = await getDataSource();
 
     return dataSource.transaction(async (manager: EntityManager) => {
-      // Bloqueia a linha existente para atualização
       const agendamento = await manager.findOne(Agendamento, {
         where: { id },
         lock: { mode: "pessimistic_write" },
@@ -131,12 +190,10 @@ export class AgendamentoService {
         throw new Error("NOT_FOUND: Agendamento não encontrado.");
       }
 
-      // Regra 1: Bloqueia reativação ou edição de agendamento cancelado
       if (agendamento.status === "Cancelado") {
         throw new Error("VALIDATION_ERROR: Não é possível editar um agendamento que se encontra cancelado.");
       }
 
-      // Regra 2: Se já foi coletado, não permite alterar a data ou cancelar
       if (agendamento.status === "Coletado") {
         if (dados.status === "Cancelado") {
           throw new Error("VALIDATION_ERROR: Não é possível cancelar uma amostra que já foi coletada.");
@@ -147,7 +204,7 @@ export class AgendamentoService {
       }
 
       if (dados.status === "Agendado") {
-        await this.validarConflitoComLock(dados.dataColeta, manager, id);
+        await this.validarConflitoMesmoHorario(dados.dataColeta, manager, id);
       }
 
       agendamento.clinica = dados.clinica;
@@ -163,7 +220,7 @@ export class AgendamentoService {
 
   /**
    * Cancela um agendamento.
-   * Regras:
+   * Regras do edital:
    * 1. Nunca remove o registro do banco.
    * 2. Bloqueia cancelamento se já estiver Cancelado.
    * 3. Bloqueia cancelamento se já estiver Coletado.
@@ -195,21 +252,19 @@ export class AgendamentoService {
   }
 
   /**
-   * Busca registros concorrentes e valida a janela de 60 minutos aplicando lock pessimista de escrita.
+   * Valida se já existe outro agendamento no mesmo horário exato (mesmo minuto) com lock pessimista.
    */
-  private static async validarConflitoComLock(
+  private static async validarConflitoMesmoHorario(
     dataColeta: Date,
     manager: EntityManager,
     ignorarId?: number
   ): Promise<void> {
-    const raioMs = (INTERVALO_BLOQUEIO_MINUTOS + 10) * 60 * 1000;
-    const inicioJanela = new Date(dataColeta.getTime() - raioMs);
-    const fimJanela = new Date(dataColeta.getTime() + raioMs);
+    const inicioMinuto = new Date(Math.floor(dataColeta.getTime() / 60000) * 60000);
+    const fimMinuto = new Date(inicioMinuto.getTime() + 59999);
 
-    // Usa lock pessimista de escrita para garantir que nenhuma transação paralela insira no mesmo intervalo
-    const agendamentosProximos = await manager.find(Agendamento, {
+    const agendamentosNoMesmoMinuto = await manager.find(Agendamento, {
       where: {
-        dataColeta: Between(inicioJanela, fimJanela),
+        dataColeta: Between(inicioMinuto, fimMinuto),
         status: "Agendado",
       },
       lock: { mode: "pessimistic_write" },
@@ -217,7 +272,7 @@ export class AgendamentoService {
 
     const conflito = verificarConflitoHorario(
       dataColeta,
-      agendamentosProximos.map((a) => ({
+      agendamentosNoMesmoMinuto.map((a) => ({
         id: a.id,
         dataColeta: a.dataColeta,
         status: a.status,

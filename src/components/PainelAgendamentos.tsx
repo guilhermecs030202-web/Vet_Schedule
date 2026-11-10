@@ -1,16 +1,23 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { AgendamentoItem } from "@/types/agendamento";
+import { AgendamentoItem, RespostaPaginada } from "@/types/agendamento";
 import { Filtros } from "./Filtros";
 import { TabelaAgendamentos } from "./TabelaAgendamentos";
 import { FormularioAgendamento } from "./FormularioAgendamento";
 import { ModalConfirmacaoCancelamento } from "./ModalConfirmacaoCancelamento";
+import { Paginacao } from "./Paginacao";
 
 export function PainelAgendamentos() {
   const [agendamentos, setAgendamentos] = useState<AgendamentoItem[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+
+  // Paginação
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const [itensPorPagina, setItensPorPagina] = useState(6);
+  const [totalRegistros, setTotalRegistros] = useState(0);
+  const [totalPaginas, setTotalPaginas] = useState(1);
 
   // Filtros
   const [statusFiltro, setStatusFiltro] = useState("");
@@ -28,10 +35,13 @@ export function PainelAgendamentos() {
 
     try {
       const params = new URLSearchParams();
+      params.set("page", String(paginaAtual));
+      params.set("limit", String(itensPorPagina));
       if (statusFiltro) params.set("status", statusFiltro);
       if (dataFiltro) params.set("data", dataFiltro);
+      if (buscaClinica.trim()) params.set("busca", buscaClinica.trim());
 
-      const url = `/api/agendamentos${params.toString() ? `?${params.toString()}` : ""}`;
+      const url = `/api/agendamentos?${params.toString()}`;
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -39,24 +49,35 @@ export function PainelAgendamentos() {
         throw new Error(errorData.error || "Erro ao carregar agendamentos.");
       }
 
-      const dados: AgendamentoItem[] = await response.json();
-      setAgendamentos(dados);
+      const dados: RespostaPaginada<AgendamentoItem> = await response.json();
+      setAgendamentos(dados.itens);
+      setTotalRegistros(dados.total);
+      setTotalPaginas(dados.totalPaginas);
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Falha na comunicação com o servidor.");
     } finally {
       setCarregando(false);
     }
-  }, [statusFiltro, dataFiltro]);
+  }, [paginaAtual, itensPorPagina, statusFiltro, dataFiltro, buscaClinica]);
 
   useEffect(() => {
     carregarAgendamentos();
   }, [carregarAgendamentos]);
 
-  // Filtro local adicional de busca textual por Clínica (diferencial)
-  const agendamentosFiltrados = agendamentos.filter((item) => {
-    if (!buscaClinica.trim()) return true;
-    return item.clinica.toLowerCase().includes(buscaClinica.toLowerCase().trim());
-  });
+  function handleStatusChange(novoStatus: string) {
+    setStatusFiltro(novoStatus);
+    setPaginaAtual(1);
+  }
+
+  function handleDataChange(novaData: string) {
+    setDataFiltro(novaData);
+    setPaginaAtual(1);
+  }
+
+  function handleBuscaClinicaChange(novaBusca: string) {
+    setBuscaClinica(novaBusca);
+    setPaginaAtual(1);
+  }
 
   function handleAbrirCriacao() {
     setItemParaEditar(null);
@@ -76,23 +97,36 @@ export function PainelAgendamentos() {
     <>
       <Filtros
         statusFiltro={statusFiltro}
-        onStatusChange={setStatusFiltro}
+        onStatusChange={handleStatusChange}
         dataFiltro={dataFiltro}
-        onDataChange={setDataFiltro}
+        onDataChange={handleDataChange}
         buscaClinica={buscaClinica}
-        onBuscaClinicaChange={setBuscaClinica}
+        onBuscaClinicaChange={handleBuscaClinicaChange}
         onNovoAgendamento={handleAbrirCriacao}
-        totalAgendamentos={agendamentosFiltrados.length}
+        totalAgendamentos={totalRegistros}
       />
 
       <TabelaAgendamentos
-        agendamentos={agendamentosFiltrados}
+        agendamentos={agendamentos}
         carregando={carregando}
         erro={erro}
         onTentarNovamente={carregarAgendamentos}
         onEditar={handleAbrirEdicao}
         onCancelar={handleAbrirCancelamento}
         onNovoAgendamento={handleAbrirCriacao}
+        paginacao={
+          <Paginacao
+            paginaAtual={paginaAtual}
+            totalPaginas={totalPaginas}
+            totalRegistros={totalRegistros}
+            itensPorPagina={itensPorPagina}
+            onPaginaChange={(p) => setPaginaAtual(p)}
+            onItensPorPaginaChange={(novoLimite) => {
+              setItensPorPagina(novoLimite);
+              setPaginaAtual(1);
+            }}
+          />
+        }
       />
 
       <FormularioAgendamento

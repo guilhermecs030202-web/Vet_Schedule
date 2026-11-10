@@ -1,7 +1,19 @@
 import "reflect-metadata";
+import fs from "fs";
 import { DataSource } from "typeorm";
 import { Agendamento } from "@/entities/Agendamento";
 import { Usuario } from "@/entities/Usuario";
+
+// Carrega .env caso exista (útil para scripts isolados como o seed fora do Next.js)
+if (fs.existsSync(".env")) {
+  try {
+    if (typeof process.loadEnvFile === "function") {
+      process.loadEnvFile(".env");
+    }
+  } catch {
+    // Silencioso se variáveis já estiverem no ambiente
+  }
+}
 
 const port = process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306;
 

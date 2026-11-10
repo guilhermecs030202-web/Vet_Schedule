@@ -11,6 +11,7 @@ interface TabelaAgendamentosProps {
   onEditar: (agendamento: AgendamentoItem) => void;
   onCancelar: (agendamento: AgendamentoItem) => void;
   onNovoAgendamento: () => void;
+  paginacao?: React.ReactNode;
 }
 
 export function TabelaAgendamentos({
@@ -21,6 +22,7 @@ export function TabelaAgendamentos({
   onEditar,
   onCancelar,
   onNovoAgendamento,
+  paginacao,
 }: TabelaAgendamentosProps) {
   function formatarDataHora(isoString: string): string {
     const data = new Date(isoString);
@@ -280,6 +282,9 @@ export function TabelaAgendamentos({
           );
         })}
       </div>
+
+      {/* Paginação */}
+      {paginacao}
     </div>
   );
 }

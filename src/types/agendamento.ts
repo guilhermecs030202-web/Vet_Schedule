@@ -20,3 +20,11 @@ export interface AgendamentoFormData {
   observacoes?: string;
 }
 
+export interface RespostaPaginada<T> {
+  itens: T[];
+  total: number;
+  pagina: number;
+  totalPaginas: number;
+  limite: number;
+}
+
