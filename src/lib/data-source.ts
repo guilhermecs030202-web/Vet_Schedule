@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import "mysql2";
 import fs from "fs";
 import { DataSource } from "typeorm";
 import { Agendamento } from "@/entities/Agendamento";
@@ -15,8 +16,26 @@ if (fs.existsSync(".env")) {
   }
 }
 
-const port = process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306;
-const useSsl = process.env.DB_SSL === "true" || process.env.DB_SSL === "1";
+function cleanEnv(val?: string): string | undefined {
+  if (!val) return undefined;
+  const trimmed = val.trim();
+  return trimmed.replace(/^["']|["']$/g, "").trim();
+}
+
+const rawHost = cleanEnv(process.env.DB_HOST) || "localhost";
+let host = rawHost;
+let port = process.env.DB_PORT ? parseInt(cleanEnv(process.env.DB_PORT) || "3306", 10) : 3306;
+
+if (host.includes(":")) {
+  const parts = host.split(":");
+  host = parts[0];
+  if (!process.env.DB_PORT && parts[1]) {
+    port = parseInt(parts[1], 10);
+  }
+}
+
+const isAiven = host.includes("aivencloud.com");
+const useSsl = isAiven || process.env.DB_SSL === "true" || process.env.DB_SSL === "1";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -29,12 +48,13 @@ export const AppDataSource =
   globalThis.typeormDataSource ??
   new DataSource({
     type: "mysql",
-    host: process.env.DB_HOST || "localhost",
+    host,
     port: isNaN(port) ? 3306 : port,
-    username: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
+    username: cleanEnv(process.env.DB_USER),
+    password: cleanEnv(process.env.DB_PASSWORD),
+    database: cleanEnv(process.env.DB_NAME),
     ssl: useSsl ? { rejectUnauthorized: false } : undefined,
+    connectTimeout: 10000,
     synchronize: false,
     logging: process.env.NODE_ENV === "development",
     entities: [Agendamento, Usuario],
