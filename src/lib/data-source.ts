@@ -54,6 +54,7 @@ export async function getDataSource(): Promise<DataSource> {
   if (!globalThis.typeormInitPromise) {
     globalThis.typeormInitPromise = AppDataSource.initialize().catch((error) => {
       globalThis.typeormInitPromise = undefined;
+      console.error("[TypeORM] Falha ao conectar ao banco de dados:", error);
       throw error;
     });
   }
